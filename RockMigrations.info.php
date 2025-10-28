@@ -3,7 +3,7 @@
 namespace ProcessWire;
 
 $info = [
-  'title' => 'RockMigrations',
+  'title' => 'RockMigrationsMatrix',
   'version' => json_decode(file_get_contents(__DIR__ . "/package.json"))->version,
   'summary' => 'The Ultimate Automation and Deployment-Tool for ProcessWire',
   'autoload' => 2,

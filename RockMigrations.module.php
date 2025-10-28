@@ -946,8 +946,10 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
         $field->type->getFieldsetCloseField($field, true);
       }
 
-      // this will auto-generate the repeater template
-      if ($field->type instanceof FieldtypeRepeater) {
+      // this will auto-generate the repeater matrix template
+      if ($field->type instanceof FieldtypeRepeaterMatrix) {
+        $field->type->getMatrixTemplate($field);
+      } elseif ($field->type instanceof FieldtypeRepeater) {
         $field->type->getRepeaterTemplate($field);
       }
     }
@@ -3306,11 +3308,35 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
       $name = pathinfo($file, PATHINFO_FILENAME);
       $class = "$namespace\\$name";
       $tmp = $this->wire(new $class());
-      if (method_exists($tmp, "migrate")) {
-        $tmp->migrate();
-        $this->migrated[] = $file;
+      $ref = new ReflectionClass($tmp);
+      $grp = ($tmp::group) ? (string) $tmp::group : (string) 1.0; //JAG
+      $grp_keys = explode('.',$grp);
+      $us_cls[$grp_keys[0]][str_pad($grp_keys[1],2,'0',STR_PAD_RIGHT)][] = [
+        'classPage' => $tmp,
+        'file' => $file,
+      ];
+    }
+    $this->krsortRecursive($us_cls); //JAG
+    bd($us_cls);
+    foreach ($us_cls?:[] as $grp => $cls) {
+      foreach ($cls as $mig) {
+          foreach ($mig as $ert) {
+            if (method_exists($ert['classPage'], "migrate")) {
+              $ert['classPage']->migrate();
+              $this->migrated[] = $ert['file'];
+            }
+         }
       }
     }
+  }
+
+  private function krsortRecursive(&$array, $sort_flags = SORT_REGULAR) { //JAG
+    if (!is_array($array)) return false;
+    krsort($array, $sort_flags);
+    foreach ($array as &$arr) {
+        $this->krsortRecursive($arr, $sort_flags);
+    }
+    return true;
   }
 
   /**
@@ -4396,9 +4422,9 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
 
       // support defining parent_id as page path
       // eg 'parent_id' => '/comments'
-      if ($key === "parent_id" and is_string($val) and $val !== '') {
+      if (in_array($key, ["parent_id", "newPageParent", "defaultValuePage"]) and is_string($val) and $val !== '') { //Added by JAG
         $parent = $this->getPage($val);
-        if (!$parent) throw new WireException("Invalid parent_id $val");
+        if (!$parent) throw new WireException("Invalid $key page_id");
         $data[$key] = $parent->id;
         continue; // early exit
       }
@@ -4463,6 +4489,14 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
     if ($field->type == "FieldtypeTable") {
       $fieldtypeTable = $field->getFieldtype();
       $fieldtypeTable->_checkSchema($field, true); // Commit changes
+    }
+
+    //If useTags flag is set, invoke the getDatabaseSchema method
+    //to indirectly call the private updateDatabaseSchema function to create the tags column. JAG Added
+
+    if (array_key_exists('useTags', $data) && $data['useTags']>0) {
+      $fieldtypefile = $this->wire->fieldtypes->FieldTypeFile;
+      $fieldtypefile->getDatabaseSchema($field);
     }
 
     $field->save();
@@ -5774,6 +5808,7 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
       $reflector = new \ReflectionClass($what);
       $file = $reflector->getFileName();
       $opt->template = $what->template;
+      $migrate = ($what::group) ? $what::group : 1; //JAG
       return $this->watchPageClass(
         $file,
         $reflector->getNamespaceName(),
@@ -6378,6 +6413,27 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
   /** START Repeater Matrix */
 
   /**
+   * Alternative getFieldByType method that guarantees FieldType is returned rather than Field.
+   * JAG
+   * 
+   * Get field by name and type
+   * @param Field|string $name
+   * @param string $type
+   * @param bool $quiet
+   * @return mixed
+   */
+  public function getFieldByType($name, $type, $quiet = false)
+  {
+    if (!$name) return false; // for addfieldtotemplate
+    $field_name = ($name instanceof Field) ? $name->name : $name;
+    $field_array = $this->fields->findByType($type);
+    $field = $field_array[$field_name];
+    if ($field) return $field;
+    if (!$quiet) $this->log("Field $name not found");
+    return false;
+  }
+
+   /**
    * Convenience method that creates a repeater matrix field with its matrix types
    *
    * @param string $name The name of the field.
@@ -6436,7 +6492,7 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
    */
   protected function addMatrixItem($field, $name, $data)
   {
-    if (!$field = $this->getField($field, false)) return;
+    if (!$field = $this->getFieldByType($field, 'FieldtypeRepeaterMatrix', false)) return; //JAG
     // do not add if there already is a matrix type with the same name
     if ($field->getMatrixTypeByName($name) !== false) return;
     // standardize fields array
@@ -6485,7 +6541,7 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
    */
   public function removeMatrixItem($field, $name)
   {
-    if (!$field = $this->getField($field, false)) return;
+    if (!$field = $this->getFieldByType($field, 'FieldtypeRepeaterMatrix', false)) return; //JAG
     $info = $field->type->getMatrixTypesInfo($field, ['type' => $name]);
     if (!$info) return;
 
@@ -6546,7 +6602,7 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
   public function setMatrixItems($field, $items, $wipe = false)
   {
     if (!$this->modules->isInstalled('FieldtypeRepeaterMatrix')) return;
-    if (!$field = $this->getField($field, false)) return;
+    if (!$field = $this->getFieldByType($field, 'FieldtypeRepeaterMatrix', false)) return;
     /** @var RepeaterMatrixField $field */
     // get all matrix types of that field
     $types = $field->getMatrixTypes();
@@ -6598,7 +6654,7 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
    */
   public function setMatrixItemData($field, $name, $data)
   {
-    if (!$field = $this->getField($field, false)) return;
+    if (!$field = $this->getFieldByType($field, 'FieldtypeRepeaterMatrix', false)) return;
     $info = $field->getMatrixTypesInfo(['type' => $name]);
     if (!$info) return;
     // standardize fields array
@@ -6744,4 +6800,49 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
       'sortedWatchlist' => $this->sortedWatchlist(),
     ];
   }
+
+//Detect PageClasses
+ /**
+  * Altered migratePageClasses to only seek and add new detected page classes. //JAG
+  */
+
+  public function detectPageClasses($path, $namespace = 'ProcessWire', $tags = ''): void
+  {
+
+    $options = [
+      'extensions' => ['php'],
+      'recursive' => 1,
+    ];
+    $namespace = "\\" . ltrim($namespace, "\\");
+
+    // create all templates
+    $files = $this->wire->files->find($path, $options);
+    $out = '';
+    foreach ($files as $file) {
+      require_once $file;
+      $name = pathinfo($file, PATHINFO_FILENAME);
+      $class = "$namespace\\$name";
+      $tmp = $this->wire(new $class());
+      if (!$tmp->template) {
+        // the page object does not have a template property
+        // so we try to get the template name from the tpl constant
+        $reflection = new ReflectionClass($tmp);
+        if ($reflection->hasConstant('tpl')) {
+          $templatename = $tmp::tpl;
+          $group = ($tmp::group) ? $tmp::group : 1;
+          $tpl = $this->wire->templates->get($templatename);
+          if (!$tpl) {
+            $tpl = $this->createTemplate($templatename, $class);
+            $this->addFieldToTemplate("title", $tpl);
+            $out .= $tpl.' template created, migrate priority: '.$group. "New Template<br>";
+          }
+          if ($tags) $this->setTemplateData($templatename, ['tags' => $tags]);
+          $tmp->template = $tpl;
+        }
+      }
+    }
+    $out = ($out == '') ? 'No new page classes/templates found.' : $out;
+    bd($out, $title = 'Page Class Detector (' . $path . ')');
+  }
+
 }
