@@ -31,6 +31,18 @@ trait MagicPage
   }
 
   /**
+   * Method that returns the pages watch priority group //JAG
+   */
+  public function getClassGroup(): float
+  {
+    $reflection = new ReflectionClass($this);
+    if ($reflection->hasConstant('group')) {
+      return (float) $reflection->getConstant('group');
+    }
+    return 1.00;
+  }
+
+  /**
    * Renders a badge in the page list
    * Often needed for adding dates to page titles etc.
    * https://i.imgur.com/nB2IYNS.png
