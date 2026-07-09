@@ -1,3 +1,23 @@
+## [7.5.0](https://github.com/baumrock/RockMigrations/compare/v7.4.2...v7.5.0) (2026-06-18)
+
+
+### Features
+
+* add setting to allow filesondemand for cli ([4b4def1](https://github.com/baumrock/RockMigrations/commit/4b4def171d2c8df4d8e9969a913d30173bd38294))
+
+
+### Bug Fixes
+
+* bump symfony/yaml to v5.4.53 for security advisories ([d0f66b3](https://github.com/baumrock/RockMigrations/commit/d0f66b33aa5b083a7820cc527181a1ab187fd983))
+* bypass changeFieldtype() for virtual fieldtypes with no DB table ([be6327c](https://github.com/baumrock/RockMigrations/commit/be6327c4d56b6f96438266afad0946fe8897e110))
+
+## [7.4.2](https://github.com/baumrock/RockMigrations/compare/v7.4.1...v7.4.2) (2026-06-14)
+
+
+### Bug Fixes
+
+* defer field save when a fieldtype lazy-loads as the FieldtypeText fallback ([6de1585](https://github.com/baumrock/RockMigrations/commit/6de15850367e1cef061f2609ab27c02572c3a25d)), closes [#2261](https://github.com/baumrock/RockMigrations/issues/2261)
+
 ## [7.4.1](https://github.com/baumrock/RockMigrations/compare/v7.4.0...v7.4.1) (2026-02-11)
 
 
@@ -18,18 +38,4 @@
 ### Features
 
 * add support for FieldtypeCombo ([b4f2ff3](https://github.com/baumrock/RockMigrations/commit/b4f2ff3afa3932c12d69135cbacf37a771400b06))
-
-## [7.2.0](https://github.com/baumrock/RockMigrations/compare/v7.1.0...v7.2.0) (2026-01-25)
-
-
-### Features
-
-* Add RepeaterMatrix config support and getCode generation ([a0ed39a](https://github.com/baumrock/RockMigrations/commit/a0ed39a31c17cf024026c86b616a9cc0a33f178b))
-
-## [7.1.0](https://github.com/baumrock/RockMigrations/compare/v7.0.0...v7.1.0) (2025-09-01)
-
-
-### Features
-
-* add support for filesystem cache ([fac8527](https://github.com/baumrock/RockMigrations/commit/fac852726c15e128b3bfcb39c4a732f64a42639c))
 
