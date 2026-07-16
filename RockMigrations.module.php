@@ -1587,6 +1587,70 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
   }
 
   /**
+   * Cache generation for migration fingerprints (bump to invalidate all).
+   */
+  private function fingerprintGeneration(): int
+  {
+    return (int)$this->wire->cache->get('rm-fp-gen');
+  }
+
+  private function fingerprintCacheKey(string $key): string
+  {
+    return 'rm-fp:' . $this->fingerprintGeneration() . ':' . $key;
+  }
+
+  /**
+   * Build a fingerprint for a migrate unit (module file, pageclass file, or arbitrary payload).
+   *
+   * @param string $key Stable id e.g. module:Foo or pageclass:ProcessWire\BarPage
+   * @param string $pathOrPayload Absolute file path or opaque string payload
+   */
+  public function migrationFingerprint(string $key, string $pathOrPayload): string
+  {
+    if (is_file($pathOrPayload)) {
+      $mtime = @filemtime($pathOrPayload) ?: 0;
+      $size = @filesize($pathOrPayload) ?: 0;
+      return md5($key . '|' . $pathOrPayload . '|' . $mtime . '|' . $size);
+    }
+    return md5($key . '|' . $pathOrPayload);
+  }
+
+  /**
+   * Whether migrate work can be skipped for this fingerprint.
+   * Never skips during migrateAll / forceMigrate (full deploy stays trustworthy).
+   */
+  public function shouldSkipMigrate(string $key, string $fingerprint): bool
+  {
+    if ($this->migrateAll) return false;
+    if ($this->wire->config->forceMigrate) return false;
+    if (!empty($this->wire->config->achillesDisableMigrateFingerprints)) return false;
+    $stored = $this->wire->cache->get($this->fingerprintCacheKey($key));
+    return $stored && hash_equals((string)$stored, $fingerprint);
+  }
+
+  /**
+   * Remember successful migrate fingerprint.
+   */
+  public function markMigrated(string $key, string $fingerprint): void
+  {
+    $this->wire->cache->save(
+      $this->fingerprintCacheKey($key),
+      $fingerprint,
+      WireCache::expireNever
+    );
+  }
+
+  /**
+   * Invalidate all migration fingerprints (next incremental run re-applies).
+   */
+  public function clearMigrationFingerprints(): void
+  {
+    $gen = $this->fingerprintGeneration() + 1;
+    $this->wire->cache->save('rm-fp-gen', $gen, WireCache::expireNever);
+    $this->log('Cleared migration fingerprints (gen=' . $gen . ')');
+  }
+
+  /**
    * Download module from url
    *
    * @param string $url
@@ -3506,8 +3570,16 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
 
     // if it is a module we call $module->migrate()
     if ($module = $file->module) {
+      $modFile = (string)$this->wire->modules->getModuleFile($module);
+      $fpKey = 'module:' . $module->className();
+      $fp = $this->migrationFingerprint($fpKey, $modFile ?: $file->path);
+      if ($this->shouldSkipMigrate($fpKey, $fp)) {
+        $this->log("  - Skip module {$module->className()} (fingerprint)");
+        return;
+      }
       $this->indent(2);
       $this->migrateModule($module);
+      $this->markMigrated($fpKey, $fp);
       $this->indent(-2);
       return;
     }
@@ -3515,6 +3587,12 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
     // if it is a pageclass we create a temporary page and migrate it
     if ($file->pageClass) {
       if ($this->doMigrate($file->path)) {
+        $fpKey = 'pageclass:' . $file->pageClass;
+        $fp = $this->migrationFingerprint($fpKey, (string)$file->path);
+        if ($this->shouldSkipMigrate($fpKey, $fp)) {
+          $this->log("  - Skip {$file->pageClass} (fingerprint)");
+          return;
+        }
         $tmp = $this->wire->pages->newPage($file->template);
         if (
           method_exists($tmp, 'migrate') or
@@ -3522,6 +3600,7 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
         ) {
           $this->log("  => {$file->pageClass}::migrate()");
           $tmp->migrate();
+          $this->markMigrated($fpKey, $fp);
         }
       } else $this->log("  - Skip {$file->pageClass} (no change)");
       return;
@@ -3530,6 +3609,12 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
     // we have a regular file
     // first we render the file
     // this will already execute commands inside the file if it is PHP
+    $fpKey = 'file:' . $file->path;
+    $fp = $this->migrationFingerprint($fpKey, (string)$file->path);
+    if ($this->shouldSkipMigrate($fpKey, $fp)) {
+      $this->log("  - Skip {$file->path} (fingerprint)");
+      return;
+    }
     $this->log("Load {$file->path}");
     $migrate = $this->runFile($file->path);
     // if rendering the file returned a string we state that it is YAML code
@@ -3539,6 +3624,7 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
         . print_r($migrate, true));
       $this->migrate($migrate);
     }
+    $this->markMigrated($fpKey, $fp);
   }
 
   /**
@@ -6211,7 +6297,24 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
     // See the readme for more information!
     if (defined("DontFireOnRefresh")) return;
     if ($this->wire->config->DontFireOnRefresh) return;
-    if (!$this->wire->session->noMigrate) $this->migrateAll = true;
+
+    $config = $this->wire->config;
+
+    // Achilles (or any site): maintenance mode skips auto migrate on refresh entirely.
+    // Intentional full runs: CLI migrate.php, $rm->run(), or $config->achillesAllowRefreshMigrate.
+    if (!empty($config->achillesMigrateMaintenance) && empty($config->achillesAllowRefreshMigrate)) {
+      if ($config->debug) {
+        $this->log(date('Y-m-d H:i:s') . ' Skip migrations on Modules::refresh (achillesMigrateMaintenance)');
+      }
+      return;
+    }
+
+    // Stock RM sets migrateAll on refresh. changed-only mode keeps incremental doMigrate().
+    if (!$this->wire->session->noMigrate) {
+      if (empty($config->achillesMigrateChangedOnlyOnRefresh)) {
+        $this->migrateAll = true;
+      }
+    }
     $this->triggeredByRefresh = true;
     $this->run();
   }
