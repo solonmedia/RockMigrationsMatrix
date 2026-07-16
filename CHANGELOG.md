@@ -11,6 +11,13 @@
 ### Bug Fixes
 
 * read and clear the once() history from the module config ([#91](https://github.com/baumrock/RockMigrations/issues/91)) ([5c64973](https://github.com/baumrock/RockMigrations/commit/5c649733a8d387f79f43f47cfb62736389ed76f1))
+## Achilles fork notes (pw-achilles)
+
+### Migration throttle / maintenance
+
+* **`triggerMigrations`**: respects `$config->achillesMigrateMaintenance` (skip auto migrate on Modules::refresh) and `$config->achillesMigrateChangedOnlyOnRefresh` (do not set `migrateAll` on refresh).
+* **Fingerprints**: `migrationFingerprint()`, `shouldSkipMigrate()`, `markMigrated()`, `clearMigrationFingerprints()` — skip unchanged module/pageclass/file migrates when not in full `migrateAll` mode.
+* Site profile loads flags from `achilles-migrate.json` via `config.php`; UI in AchillesMaintenanceJobs.
 
 ## [7.5.0](https://github.com/baumrock/RockMigrations/compare/v7.4.2...v7.5.0) (2026-06-18)
 
