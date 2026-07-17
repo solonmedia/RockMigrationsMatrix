@@ -3576,9 +3576,9 @@ class RockMigrations extends WireData implements Module, ConfigurableModule
               $ert['classPage']->migrate();
               $this->migrated[] = $ert['file'];
             }
-         }
       }
     }
+  }
   }
 
   private function krsortRecursive(&$array, $sort_flags = SORT_REGULAR) { //JAG
